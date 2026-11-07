@@ -5,9 +5,10 @@ import (
 	"crypto/sha256"
 	"errors"
 
+	"math/bits"
+
 	"github.com/zmap/zcrypto/encoding/asn1"
 	"github.com/zmap/zcrypto/x509/pkix"
-	"math/bits"
 
 	"github.com/zmap/zcrypto/x509"
 	"golang.org/x/crypto/cryptobyte"
@@ -107,20 +108,25 @@ func ParseCertificate(c *x509.Certificate) (*Certificate, error) {
 }
 
 func ValidateSelfContained(c *x509.Certificate, parsed *Certificate) error {
+	_, err := subtreeHash(c, parsed)
+	return err
+}
+
+// subtreeHash returns the hash of the proof subtree, computed from the log
+// entry and the inclusion proof.
+func subtreeHash(c *x509.Certificate, parsed *Certificate) ([sha256.Size]byte, error) {
 	if parsed.Serial>>48 == 0 {
-		return errors.New("serial number has log number zero")
+		return [sha256.Size]byte{}, errors.New("serial number has log number zero")
 	}
 	index := parsed.Serial & (1<<48 - 1)
 	if index < parsed.Proof.Start || index >= parsed.Proof.End {
-		return errors.New("serial number index is outside the proof subtree")
+		return [sha256.Size]byte{}, errors.New("serial number index is outside the proof subtree")
 	}
 	entry, err := reconstructEntry(c.RawTBSCertificate, parsed.Proof.EntryExtensions)
 	if err != nil {
-		return err
+		return [sha256.Size]byte{}, err
 	}
-	leaf := sha256.Sum256(entry)
-	_, err = EvaluateInclusionProof(index, parsed.Proof.Start, parsed.Proof.End, leaf, parsed.Proof.InclusionProof)
-	return err
+	return EvaluateInclusionProof(index, parsed.Proof.Start, parsed.Proof.End, hashLeaf(entry), parsed.Proof.InclusionProof)
 }
 
 func signatureAlgorithm(raw []byte) ([]byte, bool) {
@@ -267,6 +273,15 @@ func EvaluateInclusionProof(index, start, end uint64, leaf [sha256.Size]byte, pr
 		return [sha256.Size]byte{}, errors.New("MTC inclusion proof is too short")
 	}
 	return result, nil
+}
+
+func hashLeaf(entry []byte) [sha256.Size]byte {
+	h := sha256.New()
+	h.Write([]byte{0})
+	h.Write(entry)
+	var result [sha256.Size]byte
+	h.Sum(result[:0])
+	return result
 }
 
 func hashNode(left, right [sha256.Size]byte) [sha256.Size]byte {
