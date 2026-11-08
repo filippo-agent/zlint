@@ -22,10 +22,12 @@ var proofAlgorithmDER = []byte{0x30, 0x0a, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0
 
 type Proof struct {
 	EntryExtensions []byte
-	Start           uint64
-	End             uint64
-	InclusionProof  []byte
-	Cosignatures    []Cosignature
+	// EntryExtensionTypes are the extension_type values of EntryExtensions.
+	EntryExtensionTypes []uint16
+	Start               uint64
+	End                 uint64
+	InclusionProof      []byte
+	Cosignatures        []Cosignature
 }
 
 // A Cosignature is a subtree signature from an MTCProof.
@@ -194,6 +196,7 @@ func parseProof(in []byte) (*Proof, error) {
 			return nil, errors.New("malformed MTC entry extensions")
 		}
 		lastType = int(typ)
+		p.EntryExtensionTypes = append(p.EntryExtensionTypes, typ)
 	}
 	var previous []byte
 	for !signatures.Empty() {

@@ -19,6 +19,7 @@ func init() {
 			"e_mtc_proof_self_contained_valid",
 			"e_mtc_proof_verifies",
 			"w_mtc_ca_cosignature_missing",
+			"e_mtc_entry_extension_unrecognized",
 		},
 	})
 	lint.RegisterCertificateLint(&lint.CertificateLint{

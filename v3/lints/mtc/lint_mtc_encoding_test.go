@@ -2,6 +2,7 @@ package mtc
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/zmap/zcrypto/x509"
@@ -151,5 +152,38 @@ func TestMTCIssuer(t *testing.T) {
 	result := test.TestLintCert("e_mtc_proof_structure_valid", rebuild(t, bad, nil, nil, nil), lint.NewEmptyConfig())
 	if result.Status != lint.Error {
 		t.Errorf("got %s (%s), want error", result.Status, result.Details)
+	}
+}
+
+func TestMTCEntryExtensionUnrecognized(t *testing.T) {
+	cosigned := readMTCFile(t, "mtc_magnolia_cosigned.pem")
+	parsed, err := mtcparser.ParseCertificate(rebuild(t, cosigned, nil, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withExtensions := parsed.Proof
+	// Two extensions, of types 1 and 7.
+	withExtensions.EntryExtensions = []byte{0x00, 0x01, 0x00, 0x01, 0xaa, 0x00, 0x07, 0x00, 0x00}
+
+	for _, tt := range []struct {
+		name    string
+		cert    *x509.Certificate
+		want    lint.LintStatus
+		details string
+	}{
+		{"none", rebuild(t, cosigned, nil, nil, nil), lint.Pass, ""},
+		{"landmark", rebuild(t, readMTCFile(t, "mtc_magnolia_landmark.pem"), nil, nil, nil), lint.Pass, ""},
+		{"two", rebuild(t, cosigned, nil, nil, encodeProof(&withExtensions)), lint.Error, "[1 7]"},
+		{"malformed proof", rebuild(t, cosigned, nil, nil, []byte{0}), lint.NA, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			result := test.TestLintCert("e_mtc_entry_extension_unrecognized", tt.cert, lint.NewEmptyConfig())
+			if result.Status != tt.want {
+				t.Errorf("got %s (%s), want %s", result.Status, result.Details, tt.want)
+			}
+			if !strings.Contains(result.Details, tt.details) {
+				t.Errorf("details %q do not contain %q", result.Details, tt.details)
+			}
+		})
 	}
 }
