@@ -106,15 +106,11 @@ func caID(rawTBS []byte) ([]byte, error) {
 // number, as in step 6 of Section 7.2 of
 // draft-ietf-plants-merkle-tree-certs-07.
 func LogID(parsed *Certificate) ([]byte, error) {
-	id, err := caID(parsed.TBSCertificate)
-	if err != nil {
-		return nil, err
-	}
 	logNumber := parsed.Serial >> 48
 	if logNumber == 0 {
 		return nil, errors.New("serial number has log number zero")
 	}
-	logID := append([]byte(nil), id...)
+	logID := append([]byte(nil), parsed.CAID...)
 	logID = appendBase128(logID, 0)
 	logID = appendBase128(logID, logNumber)
 	return logID, nil

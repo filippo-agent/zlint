@@ -40,6 +40,8 @@ type Certificate struct {
 	Proof          Proof
 	Serial         uint64
 	TBSCertificate []byte
+	// CAID is the binary CA ID from the issuer.
+	CAID []byte
 }
 
 func IsCACertificate(c *x509.Certificate) bool {
@@ -90,14 +92,32 @@ func extension(c *x509.Certificate, oid asn1.ObjectIdentifier) *pkix.Extension {
 	return nil
 }
 
+// IsProofCertificate reports whether the signatureAlgorithm or the
+// TBSCertificate signature of c is id-alg-mtcProof, with any parameters, so
+// that lints using [ParseCertificate] report incorrect encodings.
 func IsProofCertificate(c *x509.Certificate) bool {
 	input := cryptobyte.String(c.Raw)
-	var cert, tbs, alg cryptobyte.String
-	return input.ReadASN1(&cert, cbasn1.SEQUENCE) && input.Empty() &&
-		cert.ReadASN1(&tbs, cbasn1.SEQUENCE) &&
-		cert.ReadASN1Element(&alg, cbasn1.SEQUENCE) &&
-		cert.SkipASN1(cbasn1.BIT_STRING) && cert.Empty() &&
-		bytes.Equal(alg, proofAlgorithmDER)
+	var cert, tbs, alg, tbsAlg cryptobyte.String
+	if !input.ReadASN1(&cert, cbasn1.SEQUENCE) ||
+		!cert.ReadASN1(&tbs, cbasn1.SEQUENCE) ||
+		!cert.ReadASN1(&alg, cbasn1.SEQUENCE) {
+		return false
+	}
+	if isProofAlgorithm(alg) {
+		return true
+	}
+	return tbs.SkipOptionalASN1(cbasn1.Tag(0).Constructed().ContextSpecific()) &&
+		tbs.SkipASN1(cbasn1.INTEGER) &&
+		tbs.ReadASN1(&tbsAlg, cbasn1.SEQUENCE) &&
+		isProofAlgorithm(tbsAlg)
+}
+
+// isProofAlgorithm reports whether the contents of an AlgorithmIdentifier
+// start with the id-alg-mtcProof OID.
+func isProofAlgorithm(alg cryptobyte.String) bool {
+	var oid cryptobyte.String
+	return alg.ReadASN1Element(&oid, cbasn1.OBJECT_IDENTIFIER) &&
+		bytes.Equal(oid, proofAlgorithmDER[2:])
 }
 
 func ParseCertificate(c *x509.Certificate) (*Certificate, error) {
@@ -113,7 +133,11 @@ func ParseCertificate(c *x509.Certificate) (*Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Certificate{Proof: *proof, Serial: serial, TBSCertificate: c.RawTBSCertificate}, nil
+	id, err := caID(c.RawTBSCertificate)
+	if err != nil {
+		return nil, err
+	}
+	return &Certificate{Proof: *proof, Serial: serial, TBSCertificate: c.RawTBSCertificate, CAID: id}, nil
 }
 
 func ValidateSelfContained(c *x509.Certificate, parsed *Certificate) error {
