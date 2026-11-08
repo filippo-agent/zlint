@@ -25,6 +25,15 @@ type Proof struct {
 	Start           uint64
 	End             uint64
 	InclusionProof  []byte
+	Cosignatures    []Cosignature
+}
+
+// A Cosignature is a subtree signature from an MTCProof.
+type Cosignature struct {
+	// CosignerID is the binary representation of the cosigner's trust anchor
+	// ID, as in Section 4 of draft-ietf-tls-trust-anchor-ids.
+	CosignerID []byte
+	Signature  []byte
 }
 
 type Certificate struct {
@@ -108,13 +117,14 @@ func ParseCertificate(c *x509.Certificate) (*Certificate, error) {
 }
 
 func ValidateSelfContained(c *x509.Certificate, parsed *Certificate) error {
-	_, err := subtreeHash(c, parsed)
+	_, err := SubtreeHash(c, parsed)
 	return err
 }
 
-// subtreeHash returns the hash of the proof subtree, computed from the log
-// entry and the inclusion proof.
-func subtreeHash(c *x509.Certificate, parsed *Certificate) ([sha256.Size]byte, error) {
+// SubtreeHash returns the hash of the proof subtree, computed from the log
+// entry and the inclusion proof, as in steps 5 to 10 of Section 7.2 of
+// draft-ietf-plants-merkle-tree-certs-07.
+func SubtreeHash(c *x509.Certificate, parsed *Certificate) ([sha256.Size]byte, error) {
 	if parsed.Serial>>48 == 0 {
 		return [sha256.Size]byte{}, errors.New("serial number has log number zero")
 	}
@@ -169,6 +179,10 @@ func parseProof(in []byte) (*Proof, error) {
 			return nil, errors.New("malformed MTC cosignatures")
 		}
 		previous = id
+		p.Cosignatures = append(p.Cosignatures, Cosignature{
+			CosignerID: append([]byte(nil), id...),
+			Signature:  append([]byte(nil), value...),
+		})
 	}
 	if !validSubtree(p.Start, p.End) {
 		return nil, errors.New("invalid MTC proof subtree")

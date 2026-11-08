@@ -39,7 +39,7 @@ func TestSubtreeHash(t *testing.T) {
 			if err := ValidateSelfContained(c, parsed); err != nil {
 				t.Fatal(err)
 			}
-			got, err := subtreeHash(c, parsed)
+			got, err := SubtreeHash(c, parsed)
 			if err != nil {
 				t.Fatal(err)
 			}

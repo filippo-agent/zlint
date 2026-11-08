@@ -17,6 +17,7 @@ func init() {
 			"e_mtc_ca_structure_valid",
 			"e_mtc_proof_structure_valid",
 			"e_mtc_proof_self_contained_valid",
+			"e_mtc_proof_verifies",
 		},
 	})
 	lint.RegisterCertificateLint(&lint.CertificateLint{
