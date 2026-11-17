@@ -32,16 +32,21 @@ func init() {
 // Mode is set.
 //
 // In "standalone" mode, the certificate must carry a valid cosignature from
-// every required cosigner, and from at least one configured cosigner.
-// Cosignatures from unconfigured cosigners are ignored.
+// every one of the cosigners and, if any mirrors are configured, from at least
+// one of them. A cosignature from any other configured mirror must be valid
+// too. Cosignatures from unconfigured cosigners are ignored.
 //
 // In "landmark" mode, the certificate must carry no cosignatures, and its
 // subtree hash must match the configured subtree with the same start and end.
 type proofVerifies struct {
 	// Mode is "standalone", "landmark", or empty to disable the lint.
 	Mode string
-	// Cosigners are the trusted cosigners, for standalone mode.
+	// Cosigners are the cosigners that cosign every certificate, such as the
+	// CA cosigner, for standalone mode.
 	Cosigners []mtcCosigner
+	// Mirrors are the cosigners at least one of which cosigns every
+	// certificate, for standalone mode.
+	Mirrors []mtcCosigner
 	// Subtrees are the trusted landmark subtrees, for landmark mode.
 	Subtrees []landmarkSubtree
 }
@@ -52,9 +57,6 @@ type mtcCosigner struct {
 	// PublicKey is the base64-encoded DER SubjectPublicKeyInfo of the
 	// cosigner's ML-DSA public key.
 	PublicKey string
-	// Required makes the lint fail if the certificate has no cosignature
-	// from this cosigner.
-	Required bool
 }
 
 type landmarkSubtree struct {
@@ -121,15 +123,19 @@ func (l *proofVerifies) standalone(parsed *mtcparser.Certificate, hash [32]byte)
 	if err != nil {
 		return &lint.LintResult{Status: lint.Error, Details: err.Error()}
 	}
-	verified := 0
-	for _, cosigner := range l.Cosigners {
+	if len(l.Cosigners) == 0 && len(l.Mirrors) == 0 {
+		return &lint.LintResult{Status: lint.Fatal, Details: "no cosigners configured"}
+	}
+	// verify reports whether the certificate carries a cosignature from
+	// cosigner, and returns a result if it is invalid.
+	verify := func(cosigner mtcCosigner) (bool, *lint.LintResult) {
 		id, err := mtcparser.ParseTrustAnchorID(cosigner.ID)
 		if err != nil {
-			return &lint.LintResult{Status: lint.Fatal, Details: err.Error()}
+			return false, &lint.LintResult{Status: lint.Fatal, Details: err.Error()}
 		}
 		key, err := parseCosignerKey(cosigner.PublicKey)
 		if err != nil {
-			return &lint.LintResult{Status: lint.Fatal, Details: fmt.Sprintf("cosigner %s: %v", cosigner.ID, err)}
+			return false, &lint.LintResult{Status: lint.Fatal, Details: fmt.Sprintf("cosigner %s: %v", cosigner.ID, err)}
 		}
 		var signature []byte
 		for _, c := range p.Cosignatures {
@@ -138,22 +144,38 @@ func (l *proofVerifies) standalone(parsed *mtcparser.Certificate, hash [32]byte)
 			}
 		}
 		if signature == nil {
-			if cosigner.Required {
-				return &lint.LintResult{Status: lint.Error, Details: "missing cosignature from required cosigner " + cosigner.ID}
-			}
-			continue
+			return false, nil
 		}
 		msg, err := mtcparser.CosignedSubtree(id, logID, p.Start, p.End, hash)
 		if err != nil {
-			return &lint.LintResult{Status: lint.Error, Details: err.Error()}
+			return false, &lint.LintResult{Status: lint.Error, Details: err.Error()}
 		}
 		if err := mldsa.Verify(key, msg, signature, nil); err != nil {
-			return &lint.LintResult{Status: lint.Error, Details: "invalid cosignature from cosigner " + cosigner.ID}
+			return false, &lint.LintResult{Status: lint.Error, Details: "invalid cosignature from cosigner " + cosigner.ID}
 		}
-		verified++
+		return true, nil
 	}
-	if verified == 0 {
-		return &lint.LintResult{Status: lint.Error, Details: "no cosignature from a configured cosigner"}
+	for _, cosigner := range l.Cosigners {
+		ok, res := verify(cosigner)
+		if res != nil {
+			return res
+		}
+		if !ok {
+			return &lint.LintResult{Status: lint.Error, Details: "missing cosignature from cosigner " + cosigner.ID}
+		}
+	}
+	mirrors := 0
+	for _, mirror := range l.Mirrors {
+		ok, res := verify(mirror)
+		if res != nil {
+			return res
+		}
+		if ok {
+			mirrors++
+		}
+	}
+	if len(l.Mirrors) > 0 && mirrors == 0 {
+		return &lint.LintResult{Status: lint.Error, Details: "no cosignature from a configured mirror"}
 	}
 	return &lint.LintResult{Status: lint.Pass}
 }

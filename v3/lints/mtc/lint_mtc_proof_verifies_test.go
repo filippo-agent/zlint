@@ -54,8 +54,11 @@ const landmarkHash = "2ac543a47ee717c21d1163f8ccd5356753f9881139571a9378b4562c70
 func TestMTCProofVerifies(t *testing.T) {
 	mirror := testCosignerKey(t, "66252.0")
 	ca := testCosignerKey(t, "66252.1")
-	cosigner := func(id, key string, required bool) string {
-		return fmt.Sprintf("[[e_mtc_proof_verifies.Cosigners]]\nID = %q\nPublicKey = %q\nRequired = %v\n", id, key, required)
+	cosigner := func(id, key string) string {
+		return fmt.Sprintf("[[e_mtc_proof_verifies.Cosigners]]\nID = %q\nPublicKey = %q\n", id, key)
+	}
+	mirrorCosigner := func(id, key string) string {
+		return fmt.Sprintf("[[e_mtc_proof_verifies.Mirrors]]\nID = %q\nPublicKey = %q\n", id, key)
 	}
 	subtree := func(start, end int, hash string) string {
 		return fmt.Sprintf("[[e_mtc_proof_verifies.Subtrees]]\nStart = %d\nEnd = %d\nHash = %q\n", start, end, hash)
@@ -83,25 +86,32 @@ func TestMTCProofVerifies(t *testing.T) {
 		{"unknown mode", cosigned, "[e_mtc_proof_verifies]\nMode = \"foo\"\n", lint.Fatal, "unknown mode"},
 
 		{"standalone", cosigned, standalone +
-			cosigner("66252.0", mirror, true) + cosigner("66252.1", ca, true), lint.Pass, ""},
+			cosigner("66252.0", mirror) + cosigner("66252.1", ca), lint.Pass, ""},
 		{"standalone with unconfigured cosigner", cosigned, standalone +
-			cosigner("66252.1", ca, true), lint.Pass, ""},
-		{"standalone with absent optional cosigner", cosigned, standalone +
-			cosigner("66252.1", ca, false) + cosigner("66252.2", ca, false), lint.Pass, ""},
+			cosigner("66252.1", ca), lint.Pass, ""},
+		{"standalone with mirror", cosigned, standalone +
+			cosigner("66252.1", ca) + mirrorCosigner("66252.0", mirror), lint.Pass, ""},
+		{"standalone with absent mirror", cosigned, standalone +
+			cosigner("66252.1", ca) + mirrorCosigner("66252.2", ca) + mirrorCosigner("66252.0", mirror), lint.Pass, ""},
+		{"standalone with only mirrors", cosigned, standalone +
+			mirrorCosigner("66252.0", mirror), lint.Pass, ""},
 		{"standalone with wrong key", cosigned, standalone +
-			cosigner("66252.0", mirror, true) + cosigner("66252.1", mirror, true), lint.Error, "invalid cosignature from cosigner 66252.1"},
+			cosigner("66252.0", mirror) + cosigner("66252.1", mirror), lint.Error, "invalid cosignature from cosigner 66252.1"},
+		{"standalone with wrong mirror key", cosigned, standalone +
+			cosigner("66252.1", ca) + mirrorCosigner("66252.2", ca) + mirrorCosigner("66252.0", ca), lint.Error, "invalid cosignature from cosigner 66252.0"},
 		{"standalone tampered", tampered, standalone +
-			cosigner("66252.1", ca, true), lint.Error, "invalid cosignature from cosigner 66252.1"},
-		{"standalone with absent required cosigner", cosigned, standalone +
-			cosigner("66252.1", ca, true) + cosigner("66252.2", ca, true), lint.Error, "missing cosignature from required cosigner 66252.2"},
-		{"standalone with no configured cosigner", cosigned, standalone +
-			cosigner("66252.2", ca, false), lint.Error, "no cosignature from a configured cosigner"},
+			cosigner("66252.1", ca), lint.Error, "invalid cosignature from cosigner 66252.1"},
+		{"standalone with absent cosigner", cosigned, standalone +
+			cosigner("66252.1", ca) + cosigner("66252.2", ca), lint.Error, "missing cosignature from cosigner 66252.2"},
+		{"standalone with no configured mirror", cosigned, standalone +
+			cosigner("66252.1", ca) + mirrorCosigner("66252.2", ca), lint.Error, "no cosignature from a configured mirror"},
 		{"standalone with no cosignatures", landmarkCert, standalone +
-			cosigner("66252.1", ca, false), lint.Error, "no cosignature from a configured cosigner"},
+			cosigner("66252.1", ca), lint.Error, "missing cosignature from cosigner 66252.1"},
+		{"standalone with no cosigners", cosigned, standalone, lint.Fatal, "no cosigners configured"},
 		{"standalone with invalid key", cosigned, standalone +
-			cosigner("66252.1", "AAAA", true), lint.Fatal, "invalid public key"},
+			cosigner("66252.1", "AAAA"), lint.Fatal, "invalid public key"},
 		{"standalone with invalid ID", cosigned, standalone +
-			cosigner("66252.01", ca, true), lint.Fatal, "invalid trust anchor ID"},
+			cosigner("66252.01", ca), lint.Fatal, "invalid trust anchor ID"},
 
 		{"landmark", landmarkCert, landmark +
 			subtree(16, 32, strings.Repeat("00", 32)) + subtree(0, 16, landmarkHash), lint.Pass, ""},
